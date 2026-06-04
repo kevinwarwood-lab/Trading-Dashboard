@@ -52,12 +52,15 @@ const server = http.createServer((req, res) => {
     }
   }
 
-  // Static files
+  // Static files — no-cache so browser always gets latest dashboard.html
   let filePath = path.join(DIR, pathname === '/' ? 'dashboard.html' : pathname);
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     const ext = path.extname(filePath);
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'text/plain' });
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'text/plain',
+      'Cache-Control': 'no-store',
+    });
     res.end(data);
   });
 });
