@@ -10,7 +10,7 @@ const DIR  = __dirname;
 const UPSTREAMS = {
   '/proxy/es/'   : 'https://es-agents-production.up.railway.app',
   '/proxy/pead/' : 'https://pead-strategy-production.up.railway.app',
-  '/proxy/tv/'   : 'http://localhost:3101',
+  '/proxy/tv/'   : process.env.TV_BASE_URL || 'http://localhost:3101',
 };
 
 function proxyRequest(targetUrl, res) {
