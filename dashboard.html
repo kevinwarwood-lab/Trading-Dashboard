@@ -191,7 +191,7 @@
 <script>
 const ES_BASE   = '/proxy/es';
 const PEAD_BASE = '/proxy/pead';
-const TV_BASE   = 'http://localhost:3101';
+const TV_BASE   = '/proxy/tv';
 const STARTING_BALANCE = 10_000;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -249,22 +249,19 @@ function calcMaxDD(pnlSeries) {
 // ── data fetching ─────────────────────────────────────────────────────────────
 
 async function fetchAllData() {
-  const [esData, peadData, tvData] = await Promise.all([
+  const [esData, peadData, tvRaw] = await Promise.all([
     safeFetch(`${ES_BASE}/api/trades`),
     safeFetch(`${PEAD_BASE}/api/signals`),
-    safeFetch(`${TV_BASE}/health`),
+    safeFetch(`${TV_BASE}/trades`),
   ]);
 
   // Status badges
-  document.getElementById('badge-es').className   = esData   ? 'badge badge-es'   : 'badge badge-err';
+  document.getElementById('badge-es').className   = esData  ? 'badge badge-es'   : 'badge badge-err';
   document.getElementById('badge-pead').className = peadData ? 'badge badge-pead' : 'badge badge-err';
-  document.getElementById('badge-tv').className   = tvData   ? 'badge badge-tv'   : 'badge badge-err';
+  document.getElementById('badge-tv').className   = tvRaw   ? 'badge badge-tv'   : 'badge badge-err';
 
   // ── ES trades ────────────────────────────────────────────────────────────────
-  const esTrades  = Array.isArray(esData)           ? esData
-                  : Array.isArray(esData?.trades)    ? esData.trades
-                  : [];
-
+  const esTrades = Array.isArray(esData) ? esData : Array.isArray(esData?.trades) ? esData.trades : [];
   const esClosed = esTrades.filter(t => t.status === 'closed' && t.pnl_dollars != null && t.pnl_points != null);
   const esOpen   = esTrades.filter(t => t.status === 'open');
 
@@ -273,37 +270,43 @@ async function fetchAllData() {
   const peadClosed  = peadSignals.filter(s => s.status === 'closed' && s.net_return_pct != null);
   const peadOpen    = peadSignals.filter(s => s.status === 'open');
 
-  // ── Aggregate stats ──────────────────────────────────────────────────────────
-  const closedCount = esClosed.length + peadClosed.length;
-  const openCount   = esOpen.length   + peadOpen.length;
+  // ── TradingView / localhost:3101 trades ───────────────────────────────────────
+  const tvAll    = Array.isArray(tvRaw) ? tvRaw.filter(t => t.pnl != null && t.symbol !== 'No qualified trades today') : [];
+  const tvClosed = tvAll.filter(t => t.status === 'closed');
+  const tvOpen   = tvAll.filter(t => t.status === 'open');
 
-  // Win rate — ES by pnl_dollars, PEAD by net_return_pct
+  // ── Aggregate stats ──────────────────────────────────────────────────────────
+  const closedCount = esClosed.length + peadClosed.length + tvClosed.length;
+  const openCount   = esOpen.length   + peadOpen.length   + tvOpen.length;
+
   const esWins   = esClosed.filter(t => t.pnl_dollars > 0).length;
   const peadWins = peadClosed.filter(s => s.net_return_pct > 0).length;
-  const winRate  = closedCount > 0 ? ((esWins + peadWins) / closedCount) * 100 : null;
+  const tvWins   = tvClosed.filter(t => t.pnl > 0).length;
+  const winRate  = closedCount > 0 ? ((esWins + peadWins + tvWins) / closedCount) * 100 : null;
 
-  // P&L pts — ES only (futures points)
+  // P&L pts — ES futures only
   const pnlPts = esClosed.reduce((s, t) => s + t.pnl_points, 0);
 
-  // P&L $ — ES closed + PEAD approximated via % * $1000 notional proxy
+  // P&L $ — all sources combined
   const esPnlDollars   = esClosed.reduce((s, t) => s + t.pnl_dollars, 0);
-  // PEAD: % * 100 as a dollar proxy (each signal ~$100 notional) — adjust if real sizing known
   const peadPnlDollars = peadClosed.reduce((s, sig) => s + sig.net_return_pct * 100, 0);
-  const pnlDollars     = esPnlDollars + peadPnlDollars;
+  const tvPnlDollars   = tvClosed.reduce((s, t) => s + t.pnl, 0);
+  const pnlDollars     = esPnlDollars + peadPnlDollars + tvPnlDollars;
 
-  // Sharpe per-trade (on combined $ series)
+  // Sharpe per-trade
   const combinedPnlSeries = [
     ...esClosed.map(t => t.pnl_dollars),
     ...peadClosed.map(s => s.net_return_pct * 100),
+    ...tvClosed.map(t => t.pnl),
   ];
   const sharpe = calcSharpe(combinedPnlSeries);
 
-  // Max drawdown ($)
-  const esOrdered   = [...esClosed].sort((a, b) => new Date(a.entry_time) - new Date(b.entry_time));
-  const peadOrdered = [...peadClosed].sort((a, b) => new Date(a.exit_date) - new Date(b.exit_date));
+  // Max drawdown — chronological across all sources
+  const tvOrdered = [...tvClosed].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   const allPnlChron = [
-    ...esOrdered.map(t => t.pnl_dollars),
-    ...peadOrdered.map(s => s.net_return_pct * 100),
+    ...[...esClosed].sort((a, b) => new Date(a.entry_time) - new Date(b.entry_time)).map(t => t.pnl_dollars),
+    ...[...peadClosed].sort((a, b) => new Date(a.exit_date) - new Date(b.exit_date)).map(s => s.net_return_pct * 100),
+    ...tvOrdered.map(t => t.pnl),
   ];
   const maxDD = calcMaxDD(allPnlChron);
 
@@ -353,7 +356,7 @@ function renderCards(stats) {
     {
       label: 'P&L ($)',
       value: fmtDollar(pnlDollars),
-      sub: 'ES + PEAD combined',
+      sub: 'ES + PEAD + TV combined',
       accent: '#f97316',
       colorVal: pnlDollars,
     },
@@ -381,7 +384,7 @@ function renderCards(stats) {
     {
       label: 'Current Balance',
       value: '$' + fmtNum(currentBalance, 0),
-      sub: `$10,000 start  ${pnlDollars >= 0 ? '+' : ''}${fmtDollar(pnlDollars)}`,
+      sub: `$10,000 start  ${fmtDollar(pnlDollars)}`,
       purple: true,
     },
   ];

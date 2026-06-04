@@ -10,10 +10,12 @@ const DIR  = __dirname;
 const UPSTREAMS = {
   '/proxy/es/'   : 'https://es-agents-production.up.railway.app',
   '/proxy/pead/' : 'https://pead-strategy-production.up.railway.app',
+  '/proxy/tv/'   : 'http://localhost:3101',
 };
 
 function proxyRequest(targetUrl, res) {
-  https.get(targetUrl, { headers: { 'Accept': 'application/json' } }, upstream => {
+  const lib = targetUrl.startsWith('https') ? https : http;
+  lib.get(targetUrl, { headers: { 'Accept': 'application/json' } }, upstream => {
     res.writeHead(upstream.statusCode, {
       'Content-Type': upstream.headers['content-type'] || 'application/json',
       'Access-Control-Allow-Origin': '*',
