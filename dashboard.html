@@ -294,7 +294,7 @@ async function fetchAllData() {
   // P&L $ — all sources combined
   const esPnlDollars   = esClosedPnl.reduce((s, t) => s + t.pnl_dollars, 0);
   const peadPnlDollars = peadClosedPnl.reduce((s, sig) => s + sig.net_return_pct * 100, 0);
-  const tvPnlDollars   = tvClosed.reduce((s, t) => s + t.pnl, 0);
+  const tvPnlDollars   = tvAll.reduce((s, t) => s + t.pnl, 0); // includes unrealized (open positions)
   const pnlDollars     = esPnlDollars + peadPnlDollars + tvPnlDollars;
 
   // Sharpe per-trade
@@ -360,7 +360,7 @@ function renderCards(stats) {
     {
       label: 'P&L ($)',
       value: fmtDollar(pnlDollars),
-      sub: 'ES + PEAD + TV combined',
+      sub: 'realized + unrealized, all sources',
       accent: '#f97316',
       colorVal: pnlDollars,
     },
