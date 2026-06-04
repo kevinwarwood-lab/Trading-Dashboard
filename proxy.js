@@ -15,13 +15,16 @@ const UPSTREAMS = {
 
 function proxyRequest(targetUrl, res) {
   const lib = targetUrl.startsWith('https') ? https : http;
+  console.log(`[proxy] → ${targetUrl}`);
   lib.get(targetUrl, { headers: { 'Accept': 'application/json' } }, upstream => {
+    console.log(`[proxy] ← ${upstream.statusCode} ${targetUrl}`);
     res.writeHead(upstream.statusCode, {
       'Content-Type': upstream.headers['content-type'] || 'application/json',
       'Access-Control-Allow-Origin': '*',
     });
     upstream.pipe(res);
   }).on('error', err => {
+    console.error(`[proxy] ERROR ${targetUrl}: ${err.message}`);
     res.writeHead(502);
     res.end(JSON.stringify({ error: err.message }));
   });
