@@ -2,7 +2,7 @@
   "name": "claude-trading",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "proxy.js",
   "scripts": {
     "start": "node proxy.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -11,8 +11,5 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
-    "express": "^5.2.1",
-    "node-fetch": "^2.7.0"
-  }
+  "dependencies": {}
 }
