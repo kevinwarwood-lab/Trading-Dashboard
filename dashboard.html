@@ -261,13 +261,15 @@ async function fetchAllData() {
   document.getElementById('badge-tv').className   = tvRaw   ? 'badge badge-tv'   : 'badge badge-err';
 
   // ── ES trades ────────────────────────────────────────────────────────────────
-  const esTrades = Array.isArray(esData) ? esData : Array.isArray(esData?.trades) ? esData.trades : [];
-  const esClosed = esTrades.filter(t => t.status === 'closed' && t.pnl_dollars != null && t.pnl_points != null);
-  const esOpen   = esTrades.filter(t => t.status === 'open');
+  const esTrades    = Array.isArray(esData) ? esData : Array.isArray(esData?.trades) ? esData.trades : [];
+  const esClosed    = esTrades.filter(t => t.status === 'closed');                          // all closed (count)
+  const esClosedPnl = esClosed.filter(t => t.pnl_dollars != null && t.pnl_points != null); // subset with P&L
+  const esOpen      = esTrades.filter(t => t.status === 'open');
 
   // ── PEAD signals ─────────────────────────────────────────────────────────────
   const peadSignals = Array.isArray(peadData?.signals) ? peadData.signals : [];
-  const peadClosed  = peadSignals.filter(s => s.status === 'closed' && s.net_return_pct != null);
+  const peadClosed  = peadSignals.filter(s => s.status === 'closed');
+  const peadClosedPnl = peadClosed.filter(s => s.net_return_pct != null);
   const peadOpen    = peadSignals.filter(s => s.status === 'open');
 
   // ── TradingView / localhost:3101 trades ───────────────────────────────────────
@@ -279,24 +281,26 @@ async function fetchAllData() {
   const closedCount = esClosed.length + peadClosed.length + tvClosed.length;
   const openCount   = esOpen.length   + peadOpen.length   + tvOpen.length;
 
-  const esWins   = esClosed.filter(t => t.pnl_dollars > 0).length;
-  const peadWins = peadClosed.filter(s => s.net_return_pct > 0).length;
+  // Win rate — only trades where we have a result
+  const esWins   = esClosedPnl.filter(t => t.pnl_dollars > 0).length;
+  const peadWins = peadClosedPnl.filter(s => s.net_return_pct > 0).length;
   const tvWins   = tvClosed.filter(t => t.pnl > 0).length;
-  const winRate  = closedCount > 0 ? ((esWins + peadWins + tvWins) / closedCount) * 100 : null;
+  const ratedCount = esClosedPnl.length + peadClosedPnl.length + tvClosed.length;
+  const winRate  = ratedCount > 0 ? ((esWins + peadWins + tvWins) / ratedCount) * 100 : null;
 
   // P&L pts — ES futures only
-  const pnlPts = esClosed.reduce((s, t) => s + t.pnl_points, 0);
+  const pnlPts = esClosedPnl.reduce((s, t) => s + t.pnl_points, 0);
 
   // P&L $ — all sources combined
-  const esPnlDollars   = esClosed.reduce((s, t) => s + t.pnl_dollars, 0);
-  const peadPnlDollars = peadClosed.reduce((s, sig) => s + sig.net_return_pct * 100, 0);
+  const esPnlDollars   = esClosedPnl.reduce((s, t) => s + t.pnl_dollars, 0);
+  const peadPnlDollars = peadClosedPnl.reduce((s, sig) => s + sig.net_return_pct * 100, 0);
   const tvPnlDollars   = tvClosed.reduce((s, t) => s + t.pnl, 0);
   const pnlDollars     = esPnlDollars + peadPnlDollars + tvPnlDollars;
 
   // Sharpe per-trade
   const combinedPnlSeries = [
-    ...esClosed.map(t => t.pnl_dollars),
-    ...peadClosed.map(s => s.net_return_pct * 100),
+    ...esClosedPnl.map(t => t.pnl_dollars),
+    ...peadClosedPnl.map(s => s.net_return_pct * 100),
     ...tvClosed.map(t => t.pnl),
   ];
   const sharpe = calcSharpe(combinedPnlSeries);
@@ -304,8 +308,8 @@ async function fetchAllData() {
   // Max drawdown — chronological across all sources
   const tvOrdered = [...tvClosed].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   const allPnlChron = [
-    ...[...esClosed].sort((a, b) => new Date(a.entry_time) - new Date(b.entry_time)).map(t => t.pnl_dollars),
-    ...[...peadClosed].sort((a, b) => new Date(a.exit_date) - new Date(b.exit_date)).map(s => s.net_return_pct * 100),
+    ...[...esClosedPnl].sort((a, b) => new Date(a.entry_time) - new Date(b.entry_time)).map(t => t.pnl_dollars),
+    ...[...peadClosedPnl].sort((a, b) => new Date(a.exit_date) - new Date(b.exit_date)).map(s => s.net_return_pct * 100),
     ...tvOrdered.map(t => t.pnl),
   ];
   const maxDD = calcMaxDD(allPnlChron);
