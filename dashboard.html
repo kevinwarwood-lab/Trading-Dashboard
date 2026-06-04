@@ -294,9 +294,11 @@ async function fetchAllData() {
   // P&L pts — ES futures only
   const pnlPts = esClosedPnl.reduce((s, t) => s + t.pnl_points, 0);
 
-  // P&L $ — all sources combined
+  // P&L $ — all sources, realized + unrealized
+  // PEAD notional = $10,000/signal → pct/100 * 10000 = pct * 100
   const esPnlDollars   = esClosedPnl.reduce((s, t) => s + t.pnl_dollars, 0);
-  const peadPnlDollars = peadClosedPnl.reduce((s, sig) => s + sig.net_return_pct * 100, 0);
+  const peadAllPnl     = [...peadClosedPnl, ...peadOpen.filter(s => s.net_return_pct != null)];
+  const peadPnlDollars = peadAllPnl.reduce((s, sig) => s + sig.net_return_pct * 100, 0);
   const tvPnlDollars   = tvAll.reduce((s, t) => s + t.pnl, 0); // includes unrealized (open positions)
   const pnlDollars     = esPnlDollars + peadPnlDollars + tvPnlDollars;
 
