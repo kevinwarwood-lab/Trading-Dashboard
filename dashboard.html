@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #f5f0f0;
+    min-height: 100vh;
+    padding: 24px;
+    color: #1a1a2e;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+
+  header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1a1a2e;
+  }
+
+  .refresh-info {
+    font-size: 0.75rem;
+    color: #888;
+  }
+
+  #last-updated {
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  .source-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .badge-es   { background: #fff3e0; color: #e65100; }
+  .badge-pead { background: #e8f5e9; color: #2e7d32; }
+  .badge-tv   { background: #e3f2fd; color: #1565c0; }
+  .badge-err  { background: #fce4ec; color: #c62828; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 20px 22px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.15s;
+  }
+  .card:hover { transform: translateY(-2px); }
+
+  .card-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #999;
+  }
+
+  .card-value {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: #1a1a2e;
+  }
+
+  .card-sub {
+    font-size: 0.72rem;
+    color: #aaa;
+    margin-top: 2px;
+  }
+
+  /* Accent stripe */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 4px; height: 100%;
+    border-radius: 16px 0 0 16px;
+    background: var(--accent, #f4845f);
+  }
+
+  /* Orange gradient card */
+  .card-gradient {
+    background: linear-gradient(135deg, #f4845f 0%, #f97316 100%);
+    color: #fff;
+  }
+  .card-gradient .card-label { color: rgba(255,255,255,0.75); }
+  .card-gradient .card-value { color: #fff; }
+  .card-gradient .card-sub   { color: rgba(255,255,255,0.65); }
+  .card-gradient::before { display: none; }
+
+  /* Purple balance card */
+  .card-purple {
+    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+  }
+  .card-purple .card-label { color: rgba(255,255,255,0.75); }
+  .card-purple .card-value { color: #fff; font-size: 1.8rem; }
+  .card-purple .card-sub   { color: rgba(255,255,255,0.65); }
+  .card-purple::before { display: none; }
+
+  .pos { color: #16a34a; }
+  .neg { color: #dc2626; }
+  .card-gradient .pos,
+  .card-gradient .neg,
+  .card-purple .pos,
+  .card-purple .neg { color: inherit; }
+
+  .spinner {
+    width: 18px; height: 18px;
+    border: 3px solid #f0e6e0;
+    border-top-color: #f4845f;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading .card-value { opacity: 0.3; }
+
+  /* Source legend */
+  .legend {
+    margin-top: 24px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 0.72rem;
+    color: #888;
+  }
+  .legend strong { color: #555; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Trading Dashboard</h1>
+    <div id="last-updated">Loading…</div>
+  </div>
+  <div class="source-badges">
+    <span class="badge badge-es"   id="badge-es"  ><span class="badge-dot" style="background:#f97316"></span>ES Agents</span>
+    <span class="badge badge-pead" id="badge-pead"><span class="badge-dot" style="background:#16a34a"></span>PEAD</span>
+    <span class="badge badge-tv"   id="badge-tv"  ><span class="badge-dot" style="background:#1d6fba"></span>TradingView</span>
+  </div>
+</header>
+
+<div class="grid" id="grid">
+  <!-- cards injected by JS -->
+</div>
+
+<div class="legend">
+  <strong>Sources:</strong>
+  <span>ES Agents — <code>es-agents-production.up.railway.app</code></span>
+  <span>PEAD — <code>pead-strategy-production.up.railway.app</code></span>
+  <span>TradingView MCP — <code>localhost:3101</code></span>
+  <span style="margin-left:auto">Auto-refreshes every 60 s</span>
+</div>
+
+<script>
+const ES_BASE   = '/proxy/es';
+const PEAD_BASE = '/proxy/pead';
+const TV_BASE   = 'http://localhost:3101';
+const STARTING_BALANCE = 10_000;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+async function safeFetch(url) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(7000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } catch (e) {
+    console.warn('Fetch failed:', url, e.message);
+    return null;
+  }
+}
+
+function fmtNum(n, decimals = 0) {
+  if (n == null || isNaN(n)) return '—';
+  return n.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+function fmtDollar(n) {
+  if (n == null || isNaN(n)) return '—';
+  const abs = Math.abs(n);
+  const s = '$' + fmtNum(abs, 0);
+  return n < 0 ? '-' + s : '+' + s;
+}
+
+function colorClass(n) {
+  if (n == null || isNaN(n)) return '';
+  return n >= 0 ? 'pos' : 'neg';
+}
+
+function calcSharpe(values) {
+  if (!values.length) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
+  const std = Math.sqrt(variance);
+  return std === 0 ? null : mean / std;
+}
+
+function calcMaxDD(pnlSeries) {
+  let peak = 0, maxDD = 0, running = 0;
+  for (const p of pnlSeries) {
+    running += p;
+    if (running > peak) peak = running;
+    const dd = peak - running;
+    if (dd > maxDD) maxDD = dd;
+  }
+  return maxDD;
+}
+
+// ── data fetching ─────────────────────────────────────────────────────────────
+
+async function fetchAllData() {
+  const [esData, peadData, tvData] = await Promise.all([
+    safeFetch(`${ES_BASE}/api/trades`),
+    safeFetch(`${PEAD_BASE}/api/signals`),
+    safeFetch(`${TV_BASE}/health`),
+  ]);
+
+  // Status badges
+  document.getElementById('badge-es').className   = esData   ? 'badge badge-es'   : 'badge badge-err';
+  document.getElementById('badge-pead').className = peadData ? 'badge badge-pead' : 'badge badge-err';
+  document.getElementById('badge-tv').className   = tvData   ? 'badge badge-tv'   : 'badge badge-err';
+
+  // ── ES trades ────────────────────────────────────────────────────────────────
+  const esTrades  = Array.isArray(esData)           ? esData
+                  : Array.isArray(esData?.trades)    ? esData.trades
+                  : [];
+
+  const esClosed = esTrades.filter(t => t.status === 'closed' && t.pnl_dollars != null && t.pnl_points != null);
+  const esOpen   = esTrades.filter(t => t.status === 'open');
+
+  // ── PEAD signals ─────────────────────────────────────────────────────────────
+  const peadSignals = Array.isArray(peadData?.signals) ? peadData.signals : [];
+  const peadClosed  = peadSignals.filter(s => s.status === 'closed' && s.net_return_pct != null);
+  const peadOpen    = peadSignals.filter(s => s.status === 'open');
+
+  // ── Aggregate stats ──────────────────────────────────────────────────────────
+  const closedCount = esClosed.length + peadClosed.length;
+  const openCount   = esOpen.length   + peadOpen.length;
+
+  // Win rate — ES by pnl_dollars, PEAD by net_return_pct
+  const esWins   = esClosed.filter(t => t.pnl_dollars > 0).length;
+  const peadWins = peadClosed.filter(s => s.net_return_pct > 0).length;
+  const winRate  = closedCount > 0 ? ((esWins + peadWins) / closedCount) * 100 : null;
+
+  // P&L pts — ES only (futures points)
+  const pnlPts = esClosed.reduce((s, t) => s + t.pnl_points, 0);
+
+  // P&L $ — ES closed + PEAD approximated via % * $1000 notional proxy
+  const esPnlDollars   = esClosed.reduce((s, t) => s + t.pnl_dollars, 0);
+  // PEAD: % * 100 as a dollar proxy (each signal ~$100 notional) — adjust if real sizing known
+  const peadPnlDollars = peadClosed.reduce((s, sig) => s + sig.net_return_pct * 100, 0);
+  const pnlDollars     = esPnlDollars + peadPnlDollars;
+
+  // Sharpe per-trade (on combined $ series)
+  const combinedPnlSeries = [
+    ...esClosed.map(t => t.pnl_dollars),
+    ...peadClosed.map(s => s.net_return_pct * 100),
+  ];
+  const sharpe = calcSharpe(combinedPnlSeries);
+
+  // Max drawdown ($)
+  const esOrdered   = [...esClosed].sort((a, b) => new Date(a.entry_time) - new Date(b.entry_time));
+  const peadOrdered = [...peadClosed].sort((a, b) => new Date(a.exit_date) - new Date(b.exit_date));
+  const allPnlChron = [
+    ...esOrdered.map(t => t.pnl_dollars),
+    ...peadOrdered.map(s => s.net_return_pct * 100),
+  ];
+  const maxDD = calcMaxDD(allPnlChron);
+
+  // PT / DD
+  const totalProfit = combinedPnlSeries.filter(v => v > 0).reduce((a, b) => a + b, 0);
+  const ptDD = maxDD > 0 ? totalProfit / maxDD : null;
+
+  // Current balance
+  const currentBalance = STARTING_BALANCE + pnlDollars;
+
+  return { closedCount, openCount, winRate, pnlPts, pnlDollars, sharpe, maxDD, ptDD, currentBalance };
+}
+
+// ── render ────────────────────────────────────────────────────────────────────
+
+function renderCards(stats) {
+  const { closedCount, openCount, winRate, pnlPts, pnlDollars, sharpe, maxDD, ptDD, currentBalance } = stats;
+
+  const cards = [
+    {
+      label: 'Closed Trades',
+      value: fmtNum(closedCount),
+      sub: 'completed positions',
+      accent: '#f97316',
+    },
+    {
+      label: 'Open Trades',
+      value: fmtNum(openCount),
+      sub: 'active positions',
+      accent: '#3b82f6',
+    },
+    {
+      label: 'Win Rate',
+      value: winRate != null ? fmtNum(winRate, 1) + '%' : '—',
+      sub: `${closedCount} closed trades`,
+      accent: '#16a34a',
+      colorVal: winRate,
+      gradient: true,
+    },
+    {
+      label: 'P&L (pts)',
+      value: pnlPts >= 0 ? '+' + fmtNum(pnlPts, 1) : fmtNum(pnlPts, 1),
+      sub: 'ES futures points',
+      accent: '#f97316',
+      colorVal: pnlPts,
+    },
+    {
+      label: 'P&L ($)',
+      value: fmtDollar(pnlDollars),
+      sub: 'ES + PEAD combined',
+      accent: '#f97316',
+      colorVal: pnlDollars,
+    },
+    {
+      label: 'Sharpe (per-trade)',
+      value: sharpe != null ? (sharpe >= 0 ? '+' : '') + fmtNum(sharpe, 2) : '—',
+      sub: 'mean / std of P&L',
+      accent: '#8b5cf6',
+      colorVal: sharpe,
+    },
+    {
+      label: 'Max Drawdown',
+      value: maxDD > 0 ? '-$' + fmtNum(maxDD, 0) : '$0',
+      sub: 'peak-to-trough',
+      accent: '#ef4444',
+      colorVal: -maxDD,
+    },
+    {
+      label: 'PT / DD',
+      value: ptDD != null ? fmtNum(ptDD, 2) + 'x' : '—',
+      sub: 'profit target ÷ max DD',
+      accent: '#0ea5e9',
+      colorVal: ptDD,
+    },
+    {
+      label: 'Current Balance',
+      value: '$' + fmtNum(currentBalance, 0),
+      sub: `$10,000 start  ${pnlDollars >= 0 ? '+' : ''}${fmtDollar(pnlDollars)}`,
+      purple: true,
+    },
+  ];
+
+  const grid = document.getElementById('grid');
+  grid.innerHTML = cards.map(c => {
+    const cls = c.purple ? 'card card-purple' : c.gradient ? 'card card-gradient' : 'card';
+    const colorCls = (!c.purple && !c.gradient && c.colorVal != null) ? colorClass(c.colorVal) : '';
+    const style = (!c.purple && !c.gradient) ? `style="--accent:${c.accent}"` : '';
+    return `
+      <div class="${cls}" ${style}>
+        <div class="card-label">${c.label}</div>
+        <div class="card-value ${colorCls}">${c.value}</div>
+        <div class="card-sub">${c.sub}</div>
+      </div>`;
+  }).join('');
+}
+
+function showLoading() {
+  const grid = document.getElementById('grid');
+  const labels = ['Closed Trades','Open Trades','Win Rate','P&L (pts)','P&L ($)','Sharpe (per-trade)','Max Drawdown','PT / DD','Current Balance'];
+  grid.innerHTML = labels.map(() => `
+    <div class="card loading" style="--accent:#f4845f">
+      <div class="card-label">&nbsp;</div>
+      <div class="card-value"><span class="spinner"></span></div>
+      <div class="card-sub">&nbsp;</div>
+    </div>`).join('');
+}
+
+async function refresh() {
+  showLoading();
+  const stats = await fetchAllData();
+  renderCards(stats);
+  document.getElementById('last-updated').textContent =
+    'Last updated: ' + new Date().toLocaleTimeString();
+}
+
+refresh();
+setInterval(refresh, 60_000);
+</script>
+</body>
+</html>
