@@ -385,7 +385,7 @@
     <div class="source-badges">
       <span class="src-badge" id="badge-es"><span class="src-dot"></span>ES Agents</span>
       <span class="src-badge" id="badge-pead"><span class="src-dot"></span>PEAD</span>
-      <span class="src-badge" id="badge-tv"><span class="src-dot"></span>TradingView</span>
+      <span class="src-badge" id="badge-tv"><span class="src-dot"></span>CashBridge</span>
     </div>
   </div>
 </header>
@@ -460,7 +460,7 @@
   <span>Sources:</span>
   <span>ES Agents — <code>es-agents-production.up.railway.app</code></span>
   <span>PEAD — <code>pead-strategy-production.up.railway.app</code></span>
-  <span>TradingView — <code>cashbridge-capital-production.up.railway.app</code></span>
+  <span>CashBridge (7 Agents) — <code>cashbridge-capital-production.up.railway.app</code></span>
   <span style="margin-left:auto">⟳ Auto-refreshes every 60 s</span>
 </footer>
 
@@ -701,7 +701,7 @@ function render(stats) {
   const minis = [
     { label: 'ES Agents P&L',  value: fmtDollar(esPnlDollars),   cls: esPnlDollars >= 0 ? 'txt-green' : 'txt-red' },
     { label: 'PEAD P&L',       value: fmtDollar(peadPnlDollars), cls: peadPnlDollars >= 0 ? 'txt-green' : 'txt-red' },
-    { label: 'TradingView P&L',value: fmtDollar(tvPnlDollars),   cls: tvPnlDollars >= 0 ? 'txt-green' : 'txt-red' },
+    { label: 'CashBridge P&L', value: fmtDollar(tvPnlDollars),   cls: tvPnlDollars >= 0 ? 'txt-green' : 'txt-red' },
     { label: 'Closed Trades',  value: closedCount,                cls: 'txt-blue' },
     { label: 'Open Trades',    value: openCount,                  cls: 'txt-orange' },
   ];
