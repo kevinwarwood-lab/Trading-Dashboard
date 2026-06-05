@@ -588,7 +588,7 @@ async function fetchAllData() {
   ];
   const maxDD = calcMaxDD(allPnlChron);
 
-  const totalProfit  = combinedPnlSeries.filter(v => v > 0).reduce((a, b) => a + b, 0);
+  const totalProfit  = allPnlChron.filter(v => v > 0).reduce((a, b) => a + b, 0);
   const ptDD         = maxDD > 0 ? totalProfit / maxDD : null;
   const currentBalance = STARTING_BALANCE + pnlDollars;
 
