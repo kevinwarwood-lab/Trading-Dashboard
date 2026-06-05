@@ -570,12 +570,15 @@ async function fetchAllData() {
   const tvPnlDollars   = tvAll.reduce((s, t) => s + t.pnl, 0);
   const pnlDollars     = esPnlDollars + peadPnlDollars + tvPnlDollars;
 
-  const combinedPnlSeries = [
-    ...esClosedPnl.map(t => t.pnl_dollars),
-    ...peadClosedPnl.map(s => s.net_return_pct * 100),
-    ...tvClosed.map(t => t.pnl),
-  ];
-  const sharpe = calcSharpe(combinedPnlSeries);
+  // Sharpe per source, then average — avoids scale-mixing suppressing the ratio
+  const sharpeValues = [
+    calcSharpe(esClosedPnl.map(t => t.pnl_dollars)),
+    calcSharpe(peadClosedPnl.map(s => s.net_return_pct * 100)),
+    calcSharpe(tvClosed.map(t => t.pnl)),
+  ].filter(v => v !== null);
+  const sharpe = sharpeValues.length > 0
+    ? sharpeValues.reduce((a, b) => a + b, 0) / sharpeValues.length
+    : null;
 
   const tvOrdered = [...tvClosed].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   const allPnlChron = [
