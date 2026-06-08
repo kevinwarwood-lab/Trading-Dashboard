@@ -117,7 +117,7 @@
   /* ── Top summary row ── */
   .summary {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 1px;
     background: var(--border);
     border-bottom: 1px solid var(--border);
@@ -350,6 +350,124 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ── Research Agent section ── */
+  #research-agent {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+  }
+
+  .research-section {
+    padding: 24px 32px;
+  }
+
+  .subject-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin-top: 20px;
+  }
+
+  .subject-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .subject-card.pbd {
+    border-left: 3px solid var(--purple);
+  }
+
+  .subject-card-header {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .subject-card-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.3;
+  }
+
+  .subject-badge {
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 99px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+
+  .subject-badge.purple {
+    background: rgba(168,85,247,.18);
+    color: var(--purple);
+    border: 1px solid rgba(168,85,247,.35);
+  }
+
+  .kv-grid {
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 7px 16px;
+    align-items: start;
+  }
+
+  .kv-key {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    white-space: nowrap;
+    padding-top: 1px;
+  }
+
+  .kv-val {
+    font-size: 0.78rem;
+    color: var(--text);
+    font-weight: 500;
+    line-height: 1.45;
+  }
+
+  .subject-card-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .footer-meta {
+    font-size: 0.68rem;
+    color: var(--muted);
+  }
+
+  .view-script-btn {
+    margin-left: auto;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 5px 14px;
+    border-radius: 6px;
+    background: rgba(168,85,247,.12);
+    color: var(--purple);
+    border: 1px solid rgba(168,85,247,.3);
+    text-decoration: none;
+    transition: background .15s, border-color .15s;
+  }
+  .view-script-btn:hover {
+    background: rgba(168,85,247,.22);
+    border-color: var(--purple);
+  }
+
   /* ── Footer ── */
   footer {
     padding: 12px 32px;
@@ -369,6 +487,7 @@
     .main { grid-template-columns: 1fr; }
     .stat-row { grid-template-columns: 24px 1fr 90px; }
     .stat-row .bar-wrap, .stat-row .status-pill { display: none; }
+    .subject-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -386,6 +505,7 @@
       <span class="src-badge" id="badge-es"><span class="src-dot"></span>ES Agents</span>
       <span class="src-badge" id="badge-pead"><span class="src-dot"></span>PEAD</span>
       <span class="src-badge" id="badge-tv"><span class="src-dot"></span>CashBridge</span>
+      <span class="src-badge" id="badge-pbd"><span class="src-dot"></span>PBD Research</span>
     </div>
   </div>
 </header>
@@ -424,6 +544,14 @@
       <div class="sum-sub">per-trade</div>
     </div>
   </div>
+  <div class="sum-card">
+    <div class="sum-icon col-orange">📐</div>
+    <div class="sum-text">
+      <div class="sum-label">PBD Target RRR</div>
+      <div class="sum-value txt-orange">1:4.5–6</div>
+      <div class="sum-sub">Patrick Nill Method</div>
+    </div>
+  </div>
 </div>
 
 <!-- ── Main ── -->
@@ -455,22 +583,89 @@
   </div>
 </div>
 
+<!-- ── Research Agent ── -->
+<section id="research-agent">
+  <div class="research-section">
+    <div class="section-title">🔬 Research Agent — Active Subjects</div>
+    <div class="subject-grid">
+
+      <!-- Card 1: PBD Strategy -->
+      <div class="subject-card pbd">
+        <div class="subject-card-header">
+          <div class="subject-card-title">PBD Strategy — Patrick Nill</div>
+          <span class="subject-badge purple">World Champion Method</span>
+        </div>
+        <div class="kv-grid">
+          <span class="kv-key">Instrument</span>
+          <span class="kv-val">ES / NQ / Correlated Pairs</span>
+
+          <span class="kv-key">Timeframes</span>
+          <span class="kv-val">5m · 15m · 1H · Daily</span>
+
+          <span class="kv-key">Profile Shape</span>
+          <span class="kv-val">P-Shape (short fade) · B-Shape (long fade)</span>
+
+          <span class="kv-key">Entry Signal</span>
+          <span class="kv-val">Fake BO re-entry + low volume</span>
+
+          <span class="kv-key">Min RRR</span>
+          <span class="kv-val">1:4.5 (target 1:6)</span>
+
+          <span class="kv-key">Win Rate Target</span>
+          <span class="kv-val">40–50%</span>
+
+          <span class="kv-key">Stop Placement</span>
+          <span class="kv-val">Beyond fake-BO wick + ATR buffer</span>
+
+          <span class="kv-key">TP1</span>
+          <span class="kv-val">POC (Point of Control)</span>
+
+          <span class="kv-key">TP2</span>
+          <span class="kv-val">Impulse Origin</span>
+
+          <span class="kv-key">Break-Even Rule</span>
+          <span class="kv-val">33% to TP1 → SL → Entry</span>
+
+          <span class="kv-key">Session Filter</span>
+          <span class="kv-val">London 07:00–10:00 · NY 09:30–12:30</span>
+
+          <span class="kv-key">SMT Divergence</span>
+          <span class="kv-val">NQ vs ES cross-check</span>
+
+          <span class="kv-key">Daily Halt</span>
+          <span class="kv-val">3% max daily drawdown</span>
+
+          <span class="kv-key">Capital Protection</span>
+          <span class="kv-val">5-layer (ATR guard + BE + halt)</span>
+        </div>
+        <div class="subject-card-footer">
+          <span class="status-pill pill-green">Active Research</span>
+          <span class="footer-meta">Added: 2026-06-08</span>
+          <span class="footer-meta">Source: Pine Script v5</span>
+          <a href="#pbd-script" class="view-script-btn">View Script</a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
 <!-- ── Footer ── -->
 <footer>
   <span>Sources:</span>
   <span>ES Agents — <code>es-agents-production.up.railway.app</code></span>
   <span>PEAD — <code>pead-strategy-production.up.railway.app</code></span>
   <span>CashBridge (7 Agents) — <code>cashbridge-capital-production.up.railway.app</code></span>
+  <span>PBD Research Agent — <code>Patrick Nill / Auction Market Theory</code></span>
   <span style="margin-left:auto">⟳ Auto-refreshes every 60 s</span>
 </footer>
 
 <script>
-const ES_BASE   = 'https://es-agents-production.up.railway.app'; // has CORS *, direct call
-const PEAD_BASE = '/proxy/pead';   // no CORS, goes via proxy
-const TV_BASE   = 'https://cashbridge-capital-production.up.railway.app'; // direct (CORS *)
+const ES_BASE   = 'https://es-agents-production.up.railway.app';
+const PEAD_BASE = '/proxy/pead';
+const TV_BASE   = 'https://cashbridge-capital-production.up.railway.app';
+const PBD_BASE  = 'http://localhost:3100/CAS/dashboard';
 const STARTING_BALANCE = 10_000;
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 async function safeFetch(url) {
   try {
@@ -518,8 +713,6 @@ function calcMaxDD(pnlSeries) {
   return maxDD;
 }
 
-// ── data fetching ─────────────────────────────────────────────────────────────
-
 async function fetchAllData() {
   const [esData, peadData, tvRaw] = await Promise.all([
     safeFetch(`${ES_BASE}/api/trades`),
@@ -527,7 +720,6 @@ async function fetchAllData() {
     safeFetch(`${TV_BASE}/trades`),
   ]);
 
-  // Status badges
   const setBadge = (id, ok) => {
     const el = document.getElementById(id);
     el.className = 'src-badge ' + (ok ? 'online' : 'offline');
@@ -535,25 +727,22 @@ async function fetchAllData() {
   setBadge('badge-es',   !!esData);
   setBadge('badge-pead', !!peadData);
   setBadge('badge-tv',   !!tvRaw);
+  setBadge('badge-pbd', true); // PBD Research Agent — always active (local subject)
 
-  // ── ES ────────────────────────────────────────────────────────────────────
   const esTrades    = Array.isArray(esData) ? esData : Array.isArray(esData?.trades) ? esData.trades : [];
   const esClosed    = esTrades.filter(t => t.status === 'closed');
   const esClosedPnl = esClosed.filter(t => t.pnl_dollars != null && t.pnl_points != null);
   const esOpen      = esTrades.filter(t => t.status === 'open');
 
-  // ── PEAD ──────────────────────────────────────────────────────────────────
   const peadSignals   = Array.isArray(peadData?.signals) ? peadData.signals : [];
   const peadClosed    = peadSignals.filter(s => s.status === 'closed');
   const peadClosedPnl = peadClosed.filter(s => s.net_return_pct != null);
   const peadOpen      = peadSignals.filter(s => s.status === 'open');
 
-  // ── TV ────────────────────────────────────────────────────────────────────
   const tvAll    = Array.isArray(tvRaw) ? tvRaw.filter(t => t.pnl != null && t.symbol !== 'No qualified trades today') : [];
   const tvClosed = tvAll.filter(t => t.status === 'closed');
   const tvOpen   = tvAll.filter(t => t.status === 'open');
 
-  // ── Aggregates ────────────────────────────────────────────────────────────
   const closedCount = esClosed.length + peadClosed.length + tvClosed.length;
   const openCount   = esOpen.length   + peadOpen.length   + tvOpen.length;
 
@@ -570,7 +759,6 @@ async function fetchAllData() {
   const tvPnlDollars   = tvAll.reduce((s, t) => s + t.pnl, 0);
   const pnlDollars     = esPnlDollars + peadPnlDollars + tvPnlDollars;
 
-  // Sharpe per source, then average — avoids scale-mixing suppressing the ratio
   const sharpeValues = [
     calcSharpe(esClosedPnl.map(t => t.pnl_dollars)),
     calcSharpe(peadClosedPnl.map(s => s.net_return_pct * 100)),
@@ -596,13 +784,10 @@ async function fetchAllData() {
            currentBalance, esPnlDollars, peadPnlDollars, tvPnlDollars, ratedCount };
 }
 
-// ── render ────────────────────────────────────────────────────────────────────
-
 function render(stats) {
   const { closedCount, openCount, winRate, pnlPts, pnlDollars, sharpe, maxDD, ptDD,
           currentBalance, esPnlDollars, peadPnlDollars, tvPnlDollars, ratedCount } = stats;
 
-  // Summary row
   document.getElementById('s-pnl').innerHTML =
     `<span class="${pnlDollars >= 0 ? 'txt-green' : 'txt-red'}">${fmtDollar(pnlDollars)}</span>`;
   document.getElementById('s-winrate').textContent =
@@ -614,12 +799,10 @@ function render(stats) {
       ? `<span class="${sharpe >= 0 ? 'txt-green' : 'txt-red'}">${sharpe >= 0 ? '+' : ''}${fmtNum(sharpe, 2)}</span>`
       : '—';
 
-  // Balance card
   document.getElementById('sb-balance').textContent = '$' + fmtNum(currentBalance, 0);
   document.getElementById('sb-balance-sub').textContent =
     `$10,000 start  ${fmtDollar(pnlDollars)}`;
 
-  // Main stat rows — [rank, name, desc, value, barPct, barColor, pillText, pillClass]
   const maxPnl = Math.max(Math.abs(esPnlDollars), Math.abs(peadPnlDollars), Math.abs(tvPnlDollars), 1);
 
   const rows = [
@@ -700,7 +883,6 @@ function render(stats) {
       <div class="status-pill ${r.pillClass}">${r.pill}</div>
     </div>`).join('');
 
-  // Mini stats sidebar
   const minis = [
     { label: 'ES Agents P&L',  value: fmtDollar(esPnlDollars),   cls: esPnlDollars >= 0 ? 'txt-green' : 'txt-red' },
     { label: 'PEAD P&L',       value: fmtDollar(peadPnlDollars), cls: peadPnlDollars >= 0 ? 'txt-green' : 'txt-red' },
