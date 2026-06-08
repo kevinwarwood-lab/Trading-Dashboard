@@ -17,6 +17,7 @@ from strategies.futures_setups import (
 from indicators.futures_indicators import pivot_points
 from risk.futures_sizing import size_contracts, scale_out_plan
 from agent_brief.humbled_radar_brief import generate_brief, post_brief
+from paper_trader import run_paper_trading
 
 
 def cmd_scan(args):
@@ -118,6 +119,18 @@ def cmd_brief(args):
         print("\nPOST failed or CAS dashboard unreachable (silent).")
 
 
+
+
+def cmd_paper_trade(args):
+    """Run live paper trading."""
+    run_paper_trading(
+        instruments=args.instruments,
+        equity=args.equity,
+        scan_interval=args.scan_interval,
+        max_duration=args.max_duration,
+        log_dir=args.log_dir,
+    )
+
 def cmd_backtest(args):
     instrument = args.instrument.upper()
     equity = args.equity
@@ -216,6 +229,13 @@ def main():
     p_bt.add_argument("--instrument", default="ES", choices=["ES", "NQ"])
     p_bt.add_argument("--equity", type=float, default=100_000)
     p_bt.add_argument("--days", type=int, default=252)
+    p_pt = sub.add_parser("paper-trade", help="Run live paper trading")
+    p_pt.add_argument("--instruments", nargs="+", default=["ES", "NQ"], help="Instruments to trade")
+    p_pt.add_argument("--equity", type=float, default=100_000, help="Account equity")
+    p_pt.add_argument("--scan-interval", type=int, default=300, help="Scan interval in seconds")
+    p_pt.add_argument("--max-duration", type=int, default=16*3600, help="Max duration in seconds (default 16 hours)")
+    p_pt.add_argument("--log-dir", type=str, default=None, help="Log directory")
+
 
     args = parser.parse_args()
 
@@ -224,6 +244,7 @@ def main():
         "signal": cmd_signal,
         "brief": cmd_brief,
         "backtest": cmd_backtest,
+        "paper-trade": cmd_paper_trade,
     }
 
     if args.cmd not in dispatch:
