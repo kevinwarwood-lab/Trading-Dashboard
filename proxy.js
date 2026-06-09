@@ -11,7 +11,7 @@ const DIR  = __dirname;
 // ES has Access-Control-Allow-Origin: * so the browser calls it directly
 const UPSTREAMS = {
   '/proxy/pead/' : 'https://pead-strategy-production.up.railway.app',
-  '/proxy/tv/'   : process.env.TV_BASE_URL || 'http://localhost:3101',
+  '/proxy/tv/'   : process.env.TV_BASE_URL || 'https://cashbridge-capital-production.up.railway.app',
 };
 
 // Prevent unhandled errors from crashing the process
