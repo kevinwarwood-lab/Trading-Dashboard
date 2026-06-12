@@ -11,10 +11,19 @@ def _yf_symbol(symbol: str) -> str:
     return _SYMBOL_MAP.get(symbol.upper(), symbol)
 
 
+def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    # yfinance >=0.2.31 returns MultiIndex columns like ('Open', 'ES=F') — flatten to plain strings
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0].lower() for c in df.columns]
+    else:
+        df.columns = [c.lower() if isinstance(c, str) else str(c).lower() for c in df.columns]
+    return df
+
+
 def load_daily(symbol: str, days: int = 400) -> pd.DataFrame:
     ticker = _yf_symbol(symbol)
     df = yf.download(ticker, period=f"{days}d", interval="1d", auto_adjust=True, progress=False)
-    df.columns = [c.lower() for c in df.columns]
+    df = _flatten_columns(df)
     df = df.rename(columns={"adj close": "close"}) if "adj close" in df.columns else df
     df = df[["open", "high", "low", "close", "volume"]].dropna()
     return df
@@ -23,7 +32,7 @@ def load_daily(symbol: str, days: int = 400) -> pd.DataFrame:
 def load_intraday(symbol: str, interval: str = "5m", days: int = 5) -> pd.DataFrame:
     ticker = _yf_symbol(symbol)
     df = yf.download(ticker, period=f"{days}d", interval=interval, auto_adjust=True, progress=False)
-    df.columns = [c.lower() for c in df.columns]
+    df = _flatten_columns(df)
     df = df.rename(columns={"adj close": "close"}) if "adj close" in df.columns else df
     df = df[["open", "high", "low", "close", "volume"]].dropna()
     if df.index.tzinfo is None:
