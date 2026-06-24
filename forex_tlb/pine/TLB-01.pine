@@ -1,0 +1,428 @@
+// =============================================================================
+// TLB-01 — Trend Line Break (Alistair Crooks swing system)
+// Pine port of forex_tlb/setups/tlb_01.py + config_crypto.yaml (APPROVED config).
+// Apply on the DAILY chart of one symbol per screen (structure_tf = trigger_tf =
+// "1d" in the validated config, so no multi-timeframe request.security() needed).
+//
+// Approved universe (highest backtested expectancy, ranked by net_R):
+//   BYBIT:AUSDT.P    BYBIT:XMRUSDT.P  BYBIT:LINKUSDT.P  BYBIT:BTCUSDT.P
+//   BYBIT:POLUSDT.P  BYBIT:ETCUSDT.P  BYBIT:LTCUSDT.P   BYBIT:XLMUSDT.P
+//   (AUSDT = Bybit's post-rebrand ticker for EOS — EOS swapped 1:1 to Vaulta
+//   (ticker "A") May 2025, EOSUSDT delisted. POLUSDT = Bybit's post-rebrand
+//   ticker for MATIC; MATICUSDT was delisted 2024-09. ".P" = USDT perpetual,
+//   needed because TLB-01 trades both directions and spot can't short.)
+//
+// Disclosed adaptations vs. the Python backtest (data over drama — these are
+// necessary for a CAUSAL, live-tradeable script, not curve-fitting):
+//   1. Level "known" gate is now a true streaming rule: a support/resistance
+//      cluster activates the instant it accumulates `minTouches` confirmed
+//      pivots. (The Python batch version's known_from could in rare cases wait
+//      for a cluster's *final* touch even past min_touches — impossible to
+//      know live. The streaming rule is the correct general definition anyway.)
+//   2. EMA-pullback entry is a resting LIMIT order at the live 21-EMA value
+//      (Python assumes a same-bar fill at ema[t] when low/high comes within an
+//      ATR-tolerance band). Standard Pine 1-bar order lag applies, as for any
+//      TradingView strategy.
+//   3. One position at a time per symbol (no pyramiding) — new candidate search
+//      is gated on being flat. The book-level correlation heat-cap and shared-
+//      equity 1% compounding across all 8 symbols CANNOT be replicated per
+//      symbol — that stays in the Python paper-trading layer (Paperclip CAS-139).
+//   4. The -5%/-10% drawdown throttle below is THIS SYMBOL'S OWN equity curve
+//      only — it cannot see correlated losses on the other 7 screens.
+// =============================================================================
+//@version=6
+strategy("TLB-01 — Trend Line Break (Crooks)", overlay=true,
+     default_qty_type=strategy.fixed, default_qty_value=0,
+     pyramiding=0, calc_on_every_tick=false,
+     initial_capital=10000, currency=currency.USD,
+     max_lines_count=500, max_labels_count=500)
+
+// ---------------------------------------------------------------------------
+// Inputs — defaults match config_crypto.yaml (the approved, gateway-passing config)
+// ---------------------------------------------------------------------------
+g1 = "Indicators"
+emaPeriod          = input.int(21, "EMA period", group=g1)
+atrPeriod           = input.int(14, "ATR period", group=g1)
+
+g2 = "Frequency & Proximity levels"
+levelPivotLR        = input.int(3, "Level pivot lookback (L/R bars)", group=g2)
+proximityAtrMult     = input.float(0.5, "Cluster proximity (x ATR median)", step=0.1, group=g2)
+minTouches           = input.int(2, "Min touches to qualify as a level", group=g2)
+
+g3 = "Setup — TLB-01"
+structPivotLR        = input.int(2, "Structural pivot lookback (L/R bars)", group=g3)
+extensionAtrMult     = input.float(1.2, "Extension required from EMA (x ATR)", step=0.1, group=g3)
+hitTolAtrMult        = input.float(0.8, "Level-hit / invalidation tolerance (x ATR)", step=0.1, group=g3)
+emaTouchAtrTol       = input.float(0.30, "EMA-touch tolerance (x ATR, informational)", step=0.05, group=g3)
+emaSlopeLookback     = input.int(3, "EMA slope confirmation lookback", group=g3)
+minStopAtrMult       = input.float(0.4, "Min stop distance (x ATR)", step=0.1, group=g3)
+maxBarsToTrigger     = input.int(25, "Max bars: level hit -> structural break", group=g3)
+maxBarsToEntry       = input.int(20, "Max bars: break -> EMA-pullback entry", group=g3)
+targetLookbackBars   = input.int(60, "Target swing-lookback window (bars)", group=g3)
+timeStopBars         = input.int(45, "Time stop (bars in trade)", group=g3)
+
+g4 = "Risk"
+riskPct              = input.float(1.0, "Risk % of equity per trade", step=0.1, group=g4)
+useDDThrottle        = input.bool(true, "Use per-symbol DD throttle (this chart only)", group=g4)
+ddReduceAt           = input.float(5.0, "Halve size at DD %", group=g4)
+ddHaltAt             = input.float(10.0, "Halt new entries at DD %", group=g4)
+
+g5 = "Display"
+showLevels            = input.bool(true, "Plot S/R levels", group=g5)
+maxLevelsPerSide      = input.int(8, "Max S/R lines per side (strongest by touch count)", minval=1, group=g5)
+showDebugLabels       = input.bool(false, "Show candidate/entry debug labels", group=g5)
+
+// ---------------------------------------------------------------------------
+// Core indicators
+// ---------------------------------------------------------------------------
+emaLine = ta.ema(close, emaPeriod)
+atrVal  = ta.atr(atrPeriod)
+
+// Running median ATR for level-clustering tolerance (Python uses the full-
+// history median; this is the causal equivalent — grows with the chart).
+var array<float> atrHist = array.new<float>()
+if not na(atrVal)
+    array.push(atrHist, atrVal)
+atrMedianAll = array.size(atrHist) > 0 ? array.median(atrHist) : na
+clusterTol   = na(atrMedianAll) ? na : atrMedianAll * proximityAtrMult
+
+// ---------------------------------------------------------------------------
+// Frequency & Proximity level detection (streaming clustering)
+//   Resistance built from confirmed pivot highs, support from pivot lows.
+//   First point in a cluster is the anchor (matches the Python greedy,
+//   chronological-order, first-anchor clustering exactly).
+// ---------------------------------------------------------------------------
+var array<float> resAnchor   = array.new<float>()
+var array<float> resSum      = array.new<float>()
+var array<int>   resCount    = array.new<int>()
+var array<int>   resKnownBar = array.new<int>()
+
+var array<float> supAnchor   = array.new<float>()
+var array<float> supSum      = array.new<float>()
+var array<int>   supCount    = array.new<int>()
+var array<int>   supKnownBar = array.new<int>()
+
+ph_lvl = ta.pivothigh(levelPivotLR, levelPivotLR)
+pl_lvl = ta.pivotlow(levelPivotLR, levelPivotLR)
+
+if not na(ph_lvl) and not na(clusterTol)
+    float p = ph_lvl
+    bool matched = false
+    if array.size(resAnchor) > 0
+        for i = 0 to array.size(resAnchor) - 1
+            if not matched and math.abs(p - array.get(resAnchor, i)) <= clusterTol
+                array.set(resSum, i, array.get(resSum, i) + p)
+                array.set(resCount, i, array.get(resCount, i) + 1)
+                array.set(resKnownBar, i, bar_index)
+                matched := true
+    if not matched
+        array.push(resAnchor, p)
+        array.push(resSum, p)
+        array.push(resCount, 1)
+        array.push(resKnownBar, bar_index)
+
+if not na(pl_lvl) and not na(clusterTol)
+    float p = pl_lvl
+    bool matched = false
+    if array.size(supAnchor) > 0
+        for i = 0 to array.size(supAnchor) - 1
+            if not matched and math.abs(p - array.get(supAnchor, i)) <= clusterTol
+                array.set(supSum, i, array.get(supSum, i) + p)
+                array.set(supCount, i, array.get(supCount, i) + 1)
+                array.set(supKnownBar, i, bar_index)
+                matched := true
+    if not matched
+        array.push(supAnchor, p)
+        array.push(supSum, p)
+        array.push(supCount, 1)
+        array.push(supKnownBar, bar_index)
+
+// ---------------------------------------------------------------------------
+// Structural pivots (shorter lookback) — used for the lower-high/higher-low
+// break line AND the prior-swing target window. Bar stored = ORIGINAL pivot
+// bar (bar_index - structPivotLR), matching the Python target-window filter.
+// ---------------------------------------------------------------------------
+var array<float> structHighPrice = array.new<float>()
+var array<int>   structHighBar   = array.new<int>()
+var array<float> structLowPrice  = array.new<float>()
+var array<int>   structLowBar    = array.new<int>()
+
+ph_s = ta.pivothigh(structPivotLR, structPivotLR)
+pl_s = ta.pivotlow(structPivotLR, structPivotLR)
+
+if not na(ph_s)
+    array.push(structHighPrice, ph_s)
+    array.push(structHighBar, bar_index - structPivotLR)
+if not na(pl_s)
+    array.push(structLowPrice, pl_s)
+    array.push(structLowBar, bar_index - structPivotLR)
+
+// ---------------------------------------------------------------------------
+// Per-symbol drawdown throttle (this chart's own equity only — NOT the
+// cross-symbol correlation heat-cap, which lives in the Python book)
+// ---------------------------------------------------------------------------
+var float hwm = strategy.initial_capital
+hwm := math.max(hwm, strategy.equity)
+ddPct = (hwm - strategy.equity) / hwm * 100.0
+sizeMult = useDDThrottle ? (ddPct >= ddHaltAt ? 0.0 : ddPct >= ddReduceAt ? 0.5 : 1.0) : 1.0
+entriesHalted = useDDThrottle and ddPct >= ddHaltAt
+
+// ---------------------------------------------------------------------------
+// Trade excursion tracking + webhook alert payload builder (for the external
+// trades dashboard — see tlb-trades-dashboard.html in cashbridge-capital).
+// Favorable/adverse excursion reset to the entry price the instant a new
+// position opens, then track the best/worst price seen while it's open.
+// ---------------------------------------------------------------------------
+var float posEntryPrice = na
+var float mfePrice = na
+var float maePrice = na
+
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    posEntryPrice := strategy.position_avg_price
+    mfePrice := strategy.position_avg_price
+    maePrice := strategy.position_avg_price
+if strategy.position_size > 0
+    mfePrice := math.max(mfePrice, high)
+    maePrice := math.min(maePrice, low)
+if strategy.position_size < 0
+    mfePrice := math.min(mfePrice, low)
+    maePrice := math.max(maePrice, high)
+
+favExc() => strategy.position_size > 0 ? mfePrice - posEntryPrice : posEntryPrice - mfePrice
+advExc() => strategy.position_size > 0 ? maePrice - posEntryPrice : posEntryPrice - maePrice
+
+// contracts/price/position_size are quoted as strings, not bare numbers: TradingView
+// locale-formats these placeholders with thousand-separator commas (e.g. "1,234.0")
+// for large quantities/prices, which corrupts unquoted JSON numbers. Server strips
+// the commas after JSON.parse succeeds.
+buildMsg() =>
+    '{"id":"{{strategy.order.id}}","comment":"{{strategy.order.comment}}",' +
+      '"action":"{{strategy.order.action}}","contracts":"{{strategy.order.contracts}}",' +
+      '"price":"{{strategy.order.price}}","position_size":"{{strategy.position_size}}",' +
+      '"market_position":"{{strategy.market_position}}",' +
+      '"prev_market_position":"{{strategy.prev_market_position}}",' +
+      '"symbol":"{{ticker}}","time":"{{time}}",' +
+      '"fav_excursion":' + str.tostring(favExc()) + ',"adv_excursion":' + str.tostring(advExc()) + '}'
+
+// ---------------------------------------------------------------------------
+// LONG state machine: "none" -> "break" -> "entry"
+// ---------------------------------------------------------------------------
+var string longState  = "none"
+var float  longLevel   = na
+var float  longTarget  = na
+var float  longLHPrice = na
+var int    longHitBar  = na
+var int    longBreakBar= na
+
+// SHORT state vars declared here too (not just below) so the mutual-exclusion
+// check right after `flat` (below) can reference both sides' state.
+var string shortState   = "none"
+var float  shortLevel    = na
+var float  shortTarget   = na
+var float  shortHLPrice  = na
+var int    shortHitBar   = na
+var int    shortBreakBar = na
+
+flat = strategy.position_size == 0
+
+// Hard mutual exclusion, enforced EVERY bar (not just at transition time):
+// once a position is open in one direction, force the OTHER side's state
+// machine to "none" and kill any of its resting orders. This has to run here,
+// before either side's "break"/"entry" logic below, because "break" state
+// never checks position direction on its own — only the initial "none" check
+// requires flat. Without this continuous check, a side that started its
+// break-state search before the other side's fill can keep running (and
+// later place/fill its own order) entirely independently of the now-open
+// opposite position, which is what caused the netting/reversal bug.
+if strategy.position_size > 0
+    shortState := "none"
+    strategy.cancel("TLB-short")
+if strategy.position_size < 0
+    longState := "none"
+    strategy.cancel("TLB-long")
+
+// -- none -> break: support hit while extended down, in a qualifying level
+if flat and longState == "none" and not entriesHalted and not na(emaLine) and not na(atrVal) and atrVal > 0
+    extendedDown = (emaLine - close) >= extensionAtrMult * atrVal
+    if extendedDown
+        hitTol = atrVal * hitTolAtrMult
+        bool found = false
+        if array.size(supSum) > 0
+            for i = 0 to array.size(supSum) - 1
+                if not found and array.get(supCount, i) >= minTouches
+                    lvl = array.get(supSum, i) / array.get(supCount, i)
+                    if low <= lvl + hitTol and low >= lvl - 2 * hitTol
+                        // last confirmed structural high (LH to break) + target (max prior high in window)
+                        if array.size(structHighPrice) > 0
+                            lastHigh = array.get(structHighPrice, array.size(structHighPrice) - 1)
+                            winStart = bar_index - targetLookbackBars
+                            float tgt = na
+                            for j = array.size(structHighBar) - 1 to 0
+                                hb = array.get(structHighBar, j)
+                                if hb < winStart
+                                    break
+                                hp = array.get(structHighPrice, j)
+                                if na(tgt) or hp > tgt
+                                    tgt := hp
+                            if not na(tgt)
+                                longLevel := lvl
+                                longTarget := tgt
+                                longLHPrice := lastHigh
+                                longHitBar := bar_index
+                                longState := "break"
+                                found := true
+
+// -- break: invalidate on close back through level, timeout, or confirm structural shift
+if longState == "break"
+    hitTol2 = atrVal * hitTolAtrMult
+    if close < longLevel - hitTol2
+        longState := "none"
+    else if (bar_index - longHitBar) > maxBarsToTrigger
+        longState := "none"
+    else if close > longLHPrice
+        longState := "entry"
+        longBreakBar := bar_index
+
+// -- entry: maintain/cancel a resting limit at the live EMA while it slopes up
+if longState == "entry"
+    emaUp = bar_index >= emaSlopeLookback and emaLine > emaLine[emaSlopeLookback]
+    candidateEntry = emaLine
+    validRR = longTarget > candidateEntry and 0.5 * (longTarget - candidateEntry) >= minStopAtrMult * atrVal
+    if emaUp and validRR and sizeMult > 0
+        riskAmt = strategy.equity * (riskPct / 100.0) * sizeMult
+        stopDist = 0.5 * (longTarget - candidateEntry)
+        qty = riskAmt / stopDist
+        strategy.entry("TLB-long", strategy.long, qty=qty, limit=candidateEntry, alert_message=buildMsg())
+    else
+        strategy.cancel("TLB-long")
+    if (bar_index - longBreakBar) > maxBarsToEntry
+        strategy.cancel("TLB-long")
+        longState := "none"
+
+// -- fill detected: lock in bracket levels, reset scanner
+var int longEntryBar = na
+var float longStopPx = na
+if strategy.position_size > 0 and longState == "entry"
+    entryPx = strategy.position_avg_price
+    longStopPx := entryPx - 0.5 * (longTarget - entryPx)
+    longEntryBar := bar_index
+    longState := "none"
+
+// Resubmitted every bar in position (same stop/target each time) purely so
+// alert_message carries fresh fav/adv excursion whichever bar the bracket fills on.
+if strategy.position_size > 0
+    strategy.exit("TLB-long-exit", from_entry="TLB-long", stop=longStopPx, limit=longTarget, alert_message=buildMsg())
+
+if strategy.position_size > 0 and not na(longEntryBar) and (bar_index - longEntryBar) >= timeStopBars
+    strategy.close("TLB-long", comment="time", alert_message=buildMsg())
+    longEntryBar := na
+
+// ---------------------------------------------------------------------------
+// SHORT state machine: mirror image (vars declared up top, with longState's)
+// ---------------------------------------------------------------------------
+if flat and shortState == "none" and not entriesHalted and not na(emaLine) and not na(atrVal) and atrVal > 0
+    extendedUp = (close - emaLine) >= extensionAtrMult * atrVal
+    if extendedUp
+        hitTol = atrVal * hitTolAtrMult
+        bool found = false
+        if array.size(resSum) > 0
+            for i = 0 to array.size(resSum) - 1
+                if not found and array.get(resCount, i) >= minTouches
+                    lvl = array.get(resSum, i) / array.get(resCount, i)
+                    if high >= lvl - hitTol and high <= lvl + 2 * hitTol
+                        if array.size(structLowPrice) > 0
+                            lastLow = array.get(structLowPrice, array.size(structLowPrice) - 1)
+                            winStart = bar_index - targetLookbackBars
+                            float tgt = na
+                            for j = array.size(structLowBar) - 1 to 0
+                                lb = array.get(structLowBar, j)
+                                if lb < winStart
+                                    break
+                                lp = array.get(structLowPrice, j)
+                                if na(tgt) or lp < tgt
+                                    tgt := lp
+                            if not na(tgt)
+                                shortLevel := lvl
+                                shortTarget := tgt
+                                shortHLPrice := lastLow
+                                shortHitBar := bar_index
+                                shortState := "break"
+                                found := true
+
+if shortState == "break"
+    hitTol2 = atrVal * hitTolAtrMult
+    if close > shortLevel + hitTol2
+        shortState := "none"
+    else if (bar_index - shortHitBar) > maxBarsToTrigger
+        shortState := "none"
+    else if close < shortHLPrice
+        shortState := "entry"
+        shortBreakBar := bar_index
+
+if shortState == "entry"
+    emaDn = bar_index >= emaSlopeLookback and emaLine < emaLine[emaSlopeLookback]
+    candidateEntry = emaLine
+    validRR = shortTarget < candidateEntry and 0.5 * (candidateEntry - shortTarget) >= minStopAtrMult * atrVal
+    if emaDn and validRR and sizeMult > 0
+        riskAmt = strategy.equity * (riskPct / 100.0) * sizeMult
+        stopDist = 0.5 * (candidateEntry - shortTarget)
+        qty = riskAmt / stopDist
+        strategy.entry("TLB-short", strategy.short, qty=qty, limit=candidateEntry, alert_message=buildMsg())
+    else
+        strategy.cancel("TLB-short")
+    if (bar_index - shortBreakBar) > maxBarsToEntry
+        strategy.cancel("TLB-short")
+        shortState := "none"
+
+var int shortEntryBar = na
+var float shortStopPx = na
+if strategy.position_size < 0 and shortState == "entry"
+    entryPx = strategy.position_avg_price
+    shortStopPx := entryPx + 0.5 * (entryPx - shortTarget)
+    shortEntryBar := bar_index
+    shortState := "none"
+
+if strategy.position_size < 0
+    strategy.exit("TLB-short-exit", from_entry="TLB-short", stop=shortStopPx, limit=shortTarget, alert_message=buildMsg())
+
+if strategy.position_size < 0 and not na(shortEntryBar) and (bar_index - shortEntryBar) >= timeStopBars
+    strategy.close("TLB-short", comment="time", alert_message=buildMsg())
+    shortEntryBar := na
+
+// ---------------------------------------------------------------------------
+// Plotting
+// ---------------------------------------------------------------------------
+plot(emaLine, "21 EMA", color=color.orange, linewidth=2)
+
+// Display-only cap: every cluster that ever reached minTouches gets stored
+// (the signal logic needs the full history), but drawing ALL of them clutters
+// low-timeframe/long-history charts badly. Sort a copy of the touch counts
+// descending and use the Nth-largest as a threshold so only the strongest
+// maxLevelsPerSide lines per side get drawn.
+if showLevels and barstate.islast
+    if array.size(resSum) > 0
+        resCountSorted = array.copy(resCount)
+        array.sort(resCountSorted, order.descending)
+        resThresh = array.get(resCountSorted, math.min(maxLevelsPerSide, array.size(resCountSorted)) - 1)
+        for i = 0 to array.size(resSum) - 1
+            if array.get(resCount, i) >= minTouches and array.get(resCount, i) >= resThresh
+                line.new(bar_index - 200, array.get(resSum, i) / array.get(resCount, i),
+                     bar_index + 20, array.get(resSum, i) / array.get(resCount, i),
+                     extend=extend.none, color=color.red, style=line.style_dashed)
+    if array.size(supSum) > 0
+        supCountSorted = array.copy(supCount)
+        array.sort(supCountSorted, order.descending)
+        supThresh = array.get(supCountSorted, math.min(maxLevelsPerSide, array.size(supCountSorted)) - 1)
+        for i = 0 to array.size(supSum) - 1
+            if array.get(supCount, i) >= minTouches and array.get(supCount, i) >= supThresh
+                line.new(bar_index - 200, array.get(supSum, i) / array.get(supCount, i),
+                     bar_index + 20, array.get(supSum, i) / array.get(supCount, i),
+                     extend=extend.none, color=color.green, style=line.style_dashed)
+
+if showDebugLabels and (longState != "none" or shortState != "none")
+    label.new(bar_index, high, longState != "none" ? "L:" + longState : "S:" + shortState,
+         color=longState != "none" ? color.green : color.red, style=label.style_label_down,
+         textcolor=color.white, size=size.tiny)
+
+plotchar(strategy.position_size > 0 and strategy.position_size[1] <= 0, "Long fill", "▲", location.belowbar, color.lime, size=size.tiny)
+plotchar(strategy.position_size < 0 and strategy.position_size[1] >= 0, "Short fill", "▼", location.abovebar, color.red, size=size.tiny)
