@@ -29,6 +29,14 @@
 //      symbol — that stays in the Python paper-trading layer (Paperclip CAS-139).
 //   4. The -5%/-10% drawdown throttle below is THIS SYMBOL'S OWN equity curve
 //      only — it cannot see correlated losses on the other 7 screens.
+//   5. FIX 2026-07-04: bracket lock-in (stop/target/time-stop arming) now
+//      triggers on the position-size transition instead of `state == "entry"`.
+//      The old condition could be skipped when the resting limit filled on the
+//      same bar the maxBarsToEntry timeout reset the state machine, leaving a
+//      position with a dead time stop and a stale stop price (ETC trade #63,
+//      open 4,000+ bars). A defensive backstop also re-arms any position found
+//      open with unarmed brackets, which closes such a position via its time
+//      stop after deploying this version.
 // =============================================================================
 //@version=6
 strategy("TLB-01 — Trend Line Break (Crooks)", overlay=true,
@@ -299,14 +307,24 @@ if longState == "entry"
         strategy.cancel("TLB-long")
         longState := "none"
 
-// -- fill detected: lock in bracket levels, reset scanner
+// -- FIX: fill detected on the position-size TRANSITION, not `longState == "entry"`.
+// The state machine can legitimately reset to "none" on the very bar the resting
+// limit fills (maxBarsToEntry timeout above), which previously skipped this block
+// and left the position with no time stop and a stale stop price.
 var int longEntryBar = na
 var float longStopPx = na
-if strategy.position_size > 0 and longState == "entry"
+if strategy.position_size > 0 and strategy.position_size[1] <= 0
     entryPx = strategy.position_avg_price
     longStopPx := entryPx - 0.5 * (longTarget - entryPx)
     longEntryBar := bar_index
     longState := "none"
+
+// FIX: defensive backstop — if a long is open but brackets were never armed
+// (e.g. a position opened under the pre-fix script), arm them now from the
+// live average price so the stop/target/time-stop all function.
+if strategy.position_size > 0 and na(longEntryBar)
+    longEntryBar := bar_index
+    longStopPx := strategy.position_avg_price - 0.5 * (longTarget - strategy.position_avg_price)
 
 // Resubmitted every bar in position (same stop/target each time) purely so
 // alert_message carries fresh fav/adv excursion whichever bar the bracket fills on.
@@ -374,13 +392,21 @@ if shortState == "entry"
         strategy.cancel("TLB-short")
         shortState := "none"
 
+// -- FIX: fill detected on the position-size TRANSITION (see long side; this is
+// the exact path that orphaned ETC trade #63 for 4,000+ bars).
 var int shortEntryBar = na
 var float shortStopPx = na
-if strategy.position_size < 0 and shortState == "entry"
+if strategy.position_size < 0 and strategy.position_size[1] >= 0
     entryPx = strategy.position_avg_price
     shortStopPx := entryPx + 0.5 * (entryPx - shortTarget)
     shortEntryBar := bar_index
     shortState := "none"
+
+// FIX: defensive backstop — arms brackets on any short found open without them
+// (this is what closes the currently-stuck ETC position after deployment).
+if strategy.position_size < 0 and na(shortEntryBar)
+    shortEntryBar := bar_index
+    shortStopPx := strategy.position_avg_price + 0.5 * (strategy.position_avg_price - shortTarget)
 
 if strategy.position_size < 0
     strategy.exit("TLB-short-exit", from_entry="TLB-short", stop=shortStopPx, limit=shortTarget, alert_message=buildMsg())
