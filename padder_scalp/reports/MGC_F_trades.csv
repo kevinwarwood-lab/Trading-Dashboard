@@ -1,0 +1,2 @@
+symbol,side,entry_time,entry_price,stop_price,target_price,qty,exit_time,exit_price,exit_reason,r_multiple,pnl
+MGC=F,long,2026-06-03 11:25:00-04:00,4473.2001953125,4467.19990234375,4491.050048828125,1.6665852904318328,2026-06-03 11:30:00-04:00,4473.0,session_end,-0.033364256302590406,-7.469557150529985

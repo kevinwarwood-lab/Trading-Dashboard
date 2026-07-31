@@ -1,0 +1,297 @@
+//@version=6
+// PADDER SCALP + BOX THEORY  (PDS-01)
+// Intended chart: 5-minute candles, NYSE session symbols (works on futures/crypto too).
+//
+// Layer 1 — Daily review:
+//   Daily ATR(14) from the PREVIOUS completed day (no repaint) and a
+//   "manipulation threshold" = 20% of that ATR. Previous day high/low are the
+//   master supply/demand levels.
+// Layer 2 — The Box (09:30–11:30 New York):
+//   Box top/bottom = previous day's high/low. If price OPENS the session
+//   gapped outside yesterday's range, "Cheater Box" mode kicks in and the box
+//   tracks the current session's highest/lowest points instead (note: the
+//   cheater box grows live during the session, so its zones move intra-session).
+//   Zones: top 20% = Sell Zone, bottom 20% = Buy Zone, middle 60% = No-Diddle.
+//   Manipulation check: if the first 15 minutes of the session have a range
+//   >= 20% of the daily ATR, the day is flagged "Manipulation Confirmed" and
+//   trading is enabled.
+// Layer 3 — 5-minute execution:
+//   Need >= 3 consecutive candles pushing INTO the zone (down candles for a
+//   buy, up candles for a sell), then a signal candle:
+//     John Wick    = hammer / inverted hammer (wick >= 50% of candle range)
+//     Power Tower  = engulfing-style reversal whose body takes out >= 40%
+//                    (30–50% adjustable) of the previous candle's range
+//   NO entry on the signal candle. Enter only when a later candle CLOSES
+//   beyond the signal candle's close (above it for longs, below for shorts).
+//   The signal stays armed for N bars (default 3), then expires.
+// Layer 4 — Risk:
+//   Qty sized so the stop-out loses exactly 1% of equity. Stop goes below the
+//   signal wick (default) or just outside the box. Target = box midpoint;
+//   optionally skip any trade where the midpoint pays less than 2R.
+//
+// Orders are placed on bar close and fill on the next bar open (TV default),
+// which matches "enter after the confirmation candle closes".
+
+strategy("Padder Scalp — Box Theory (PDS-01)",
+     overlay          = true,
+     initial_capital  = 10000,
+     pyramiding       = 0,
+     commission_type  = strategy.commission.percent,
+     commission_value = 0.02,
+     max_boxes_count  = 500,
+     max_lines_count  = 500,
+     max_labels_count = 500)
+
+// =================== Inputs ===================
+grp1 = "Layer 1 — Daily setup"
+atrLen   = input.int(14, "Daily ATR length", minval = 1, group = grp1)
+manipPct = input.float(20.0, "Manipulation threshold (% of daily ATR)", minval = 1.0, maxval = 100.0, group = grp1) / 100.0
+
+grp2 = "Layer 2 — Box"
+sessStr = input.session("0930-1130", "Box session (New York time)", group = grp2,
+     tooltip = "Box opens at NY open and closes 2 hours later. Weekdays only.")
+zonePct = input.float(20.0, "Sweet-spot zone size (% of box)", minval = 5.0, maxval = 45.0, group = grp2,
+     tooltip = "Top zone = Sell, bottom zone = Buy, everything between = No-Diddle Zone.") / 100.0
+
+grp3 = "Layer 3 — Signals"
+minRun   = input.int(3, "Consecutive candles into the zone before a signal", minval = 1, group = grp3)
+wickPct  = input.float(50.0, "John Wick: wick >= % of candle range", minval = 10.0, maxval = 90.0, group = grp3) / 100.0
+towerPct = input.float(40.0, "Power Tower: body >= % of prev candle range", minval = 10.0, maxval = 100.0, group = grp3,
+     tooltip = "Source material says 30-50%; 40% is the middle of that band.") / 100.0
+armBars  = input.int(5, "Signal stays armed for N bars (fallback)", minval = 1, group = grp3,
+     tooltip = "If no candle closes beyond the signal close within N bars, the setup expires. Used as-is unless 'Auto-tailor by symbol' below is on and the symbol is MES/MNQ.")
+useAutoTune = input.bool(true, "Auto-tailor by symbol (MES: arm 4 / R:R 1.5 — MNQ: arm 3 / R:R 2.0)", group = grp3,
+     tooltip = "Per-symbol tuning from 60 days of 5m data. arm_bars: MES needed up to 4 bars to confirm (never benefited from more), MNQ's good setups confirmed fast (extra bars added weaker trades). min R:R: MES's default 2.0 throttled it — total_R rose monotonically across every zone size as R:R dropped toward ~1.25, so 1.5 is used as a sane floor; MNQ showed the opposite (loosening below 1.5 only added losers) so it keeps 2.0. Small sample (single-digit trade counts) — a starting point, not a proven optimum. Falls back to the manual inputs for any other symbol.")
+armBarsAuto = syminfo.root == "MES" ? 4 : syminfo.root == "MNQ" ? 3 : armBars
+armBarsEff = useAutoTune ? armBarsAuto : armBars
+
+grp4 = "Layer 4 — Risk"
+riskMode  = input.string("Fixed dollar", "Risk mode", options = ["% of equity", "Fixed dollar"], group = grp4,
+     tooltip = "% of equity sizes off the strategy's own simulated equity (starts at initial_capital above), NOT your real broker balance — only meaningful if that number happens to match your account. Fixed dollar risks a flat $ amount per trade regardless of equity, which is what you actually want when the account is too small for stop_dist x point_value to fit a sane % of it.")
+riskPct   = input.float(1.0, "Risk per trade (% of equity)", minval = 0.1, maxval = 5.0, group = grp4) / 100.0
+fixedRiskUSD = input.float(75.0, "Fixed risk per trade (USD)", minval = 1.0, group = grp4,
+     tooltip = "Only used when Risk mode = Fixed dollar. Qty is floored to whole contracts; if even 1 contract costs more than this, the trade is skipped rather than taken oversized.")
+stopMode  = input.string("Signal wick", "Stop placement", options = ["Signal wick", "Box edge"], group = grp4)
+stopBufT  = input.int(2, "Stop buffer (ticks)", minval = 0, group = grp4)
+minRR     = input.float(2.0, "Minimum reward:risk at the midpoint target (fallback)", minval = 0.5, group = grp4,
+     tooltip = "Used as-is unless 'Auto-tailor by symbol' (Layer 3) is on and the symbol is MES/MNQ, in which case MES=1.5 and MNQ=2.0.")
+enforceRR = input.bool(true, "Skip trades where the midpoint target pays < min R:R", group = grp4)
+minRRAuto = syminfo.root == "MES" ? 1.5 : syminfo.root == "MNQ" ? 2.0 : minRR
+minRREff  = useAutoTune ? minRRAuto : minRR
+flatAtEnd = input.bool(true, "Close any open trade when the box session ends", group = grp4)
+
+tz = "America/New_York"
+
+// =================== Layer 1: daily data (previous completed day => no repaint) ===================
+dATR = request.security(syminfo.tickerid, "D", ta.atr(atrLen)[1], lookahead = barmerge.lookahead_on)
+pdH  = request.security(syminfo.tickerid, "D", high[1],           lookahead = barmerge.lookahead_on)
+pdL  = request.security(syminfo.tickerid, "D", low[1],            lookahead = barmerge.lookahead_on)
+manipThresh = manipPct * dATR
+
+// =================== Session detection ===================
+inSess  = not na(time(timeframe.period, sessStr + ":23456", tz))
+newSess = inSess and not inSess[1]
+sessEnd = not inSess and inSess[1]
+
+// =================== Layer 2: box state ===================
+var float boxTop         = na
+var float boxBot         = na
+var bool  cheater        = false
+var bool  manipDone      = false   // first-15-minute measurement finalized
+var bool  manipConfirmed = false
+var float f15H           = na
+var float f15L           = na
+var int   sessT0         = na
+var box   bMain          = na
+var box   bSell          = na
+var box   bBuy           = na
+var line  lMid           = na
+
+if newSess
+    cheater        := open > pdH or open < pdL
+    boxTop         := cheater ? high : pdH
+    boxBot         := cheater ? low  : pdL
+    manipDone      := false
+    manipConfirmed := false
+    f15H           := high
+    f15L           := low
+    sessT0         := time
+    rng0            = boxTop - boxBot
+    bMain := box.new(bar_index, boxTop, bar_index, boxBot,
+         border_color = cheater ? color.new(color.orange, 30) : color.new(color.gray, 30),
+         border_style = cheater ? line.style_dashed : line.style_solid,
+         bgcolor = color.new(color.gray, 96))
+    bSell := box.new(bar_index, boxTop, bar_index, boxTop - zonePct * rng0,
+         border_color = na, bgcolor = color.new(color.red, 85))
+    bBuy  := box.new(bar_index, boxBot + zonePct * rng0, bar_index, boxBot,
+         border_color = na, bgcolor = color.new(color.green, 85))
+    lMid  := line.new(bar_index, (boxTop + boxBot) / 2, bar_index, (boxTop + boxBot) / 2,
+         color = color.new(color.orange, 30), style = line.style_dashed)
+
+// Cheater box tracks the session's live extremes; zones follow.
+if inSess and not na(bMain)
+    if cheater
+        boxTop := math.max(boxTop, high)
+        boxBot := math.min(boxBot, low)
+    rngNow = boxTop - boxBot
+    midNow = (boxTop + boxBot) / 2
+    box.set_right(bMain, bar_index),  box.set_top(bMain, boxTop),                    box.set_bottom(bMain, boxBot)
+    box.set_right(bSell, bar_index),  box.set_top(bSell, boxTop),                    box.set_bottom(bSell, boxTop - zonePct * rngNow)
+    box.set_right(bBuy, bar_index),   box.set_top(bBuy, boxBot + zonePct * rngNow),  box.set_bottom(bBuy, boxBot)
+    line.set_x2(lMid, bar_index),     line.set_y1(lMid, midNow),                     line.set_y2(lMid, midNow)
+
+// First 15 minutes of the session => manipulation check.
+fifteenMs = 15 * 60 * 1000
+if inSess and not manipDone and not na(sessT0)
+    if time - sessT0 < fifteenMs
+        f15H := math.max(f15H, high)
+        f15L := math.min(f15L, low)
+    if time_close - sessT0 >= fifteenMs
+        manipDone      := true
+        manipConfirmed := (f15H - f15L) >= manipThresh
+
+// =================== Zones ===================
+boxRng     = boxTop - boxBot
+buyZoneHi  = boxBot + zonePct * boxRng
+sellZoneLo = boxTop - zonePct * boxRng
+boxMid     = (boxTop + boxBot) / 2
+inBuyZone  = inSess and not na(boxRng) and boxRng > 0 and close <= buyZoneHi
+inSellZone = inSess and not na(boxRng) and boxRng > 0 and close >= sellZoneLo
+
+// =================== Layer 3: momentum runs + signal candles ===================
+var int downRun = 0
+var int upRun   = 0
+downRun := close < open ? downRun + 1 : 0
+upRun   := close > open ? upRun + 1 : 0
+
+candleRng = high - low
+body      = math.abs(close - open)
+loWick    = math.min(open, close) - low
+hiWick    = high - math.max(open, close)
+prevRng   = high[1] - low[1]
+
+jwBull = candleRng > 0 and loWick >= wickPct * candleRng                  // hammer
+jwBear = candleRng > 0 and hiWick >= wickPct * candleRng                  // inverted hammer
+ptBull = close > open and close[1] < open[1] and prevRng > 0 and body >= towerPct * prevRng and close >= open[1]
+ptBear = close < open and close[1] > open[1] and prevRng > 0 and body >= towerPct * prevRng and close <= open[1]
+
+canTrade   = inSess and manipDone and manipConfirmed
+bullSignal = canTrade and inBuyZone  and downRun[1] >= minRun and (jwBull or ptBull)
+bearSignal = canTrade and inSellZone and upRun[1]   >= minRun and (jwBear or ptBear)
+
+// =================== Armed signal state (enter on the NEXT candle that confirms) ===================
+var float  sigCloseL = na
+var float  sigLowL   = na
+var int    armL      = 0
+var string sigTypeL  = na
+var float  sigCloseS = na
+var float  sigHighS  = na
+var int    armS      = 0
+var string sigTypeS  = na
+
+// --- Trigger check FIRST (uses last bar's armed state, so the signal candle itself can never enter) ---
+buf       = stopBufT * syminfo.mintick
+longStop  = stopMode == "Box edge" ? boxBot - buf : sigLowL - buf
+shortStop = stopMode == "Box edge" ? boxTop + buf : sigHighS + buf
+
+enterLong  = canTrade and armL > 0 and not na(sigCloseL) and close > sigCloseL and strategy.position_size == 0
+enterShort = canTrade and armS > 0 and not na(sigCloseS) and close < sigCloseS and strategy.position_size == 0
+
+if enterLong
+    stopDist = close - longStop
+    rr = stopDist > 0 ? (boxMid - close) / stopDist : na
+    if stopDist > 0 and boxMid > close and (not enforceRR or (not na(rr) and rr >= minRREff))
+        riskDollars = riskMode == "Fixed dollar" ? fixedRiskUSD : strategy.equity * riskPct
+        qty = math.floor(riskDollars / (stopDist * syminfo.pointvalue))
+        if qty > 0
+            strategy.entry("L", strategy.long, qty = qty)
+            strategy.exit("L-X", from_entry = "L", stop = longStop, limit = boxMid)
+            alert("PDS-01 LONG " + syminfo.ticker +
+                 " | qty=" + str.tostring(qty) +
+                 " | entry=" + str.tostring(close, format.mintick) +
+                 " | stop=" + str.tostring(longStop, format.mintick) +
+                 " | target=" + str.tostring(boxMid, format.mintick) +
+                 " | R:R=" + str.tostring(rr, "#.##") +
+                 " | signal=" + sigTypeL,
+                 alert.freq_once_per_bar_close)
+    armL := 0
+
+if enterShort
+    stopDist = shortStop - close
+    rr = stopDist > 0 ? (close - boxMid) / stopDist : na
+    if stopDist > 0 and boxMid < close and (not enforceRR or (not na(rr) and rr >= minRREff))
+        riskDollars = riskMode == "Fixed dollar" ? fixedRiskUSD : strategy.equity * riskPct
+        qty = math.floor(riskDollars / (stopDist * syminfo.pointvalue))
+        if qty > 0
+            strategy.entry("S", strategy.short, qty = qty)
+            strategy.exit("S-X", from_entry = "S", stop = shortStop, limit = boxMid)
+            alert("PDS-01 SHORT " + syminfo.ticker +
+                 " | qty=" + str.tostring(qty) +
+                 " | entry=" + str.tostring(close, format.mintick) +
+                 " | stop=" + str.tostring(shortStop, format.mintick) +
+                 " | target=" + str.tostring(boxMid, format.mintick) +
+                 " | R:R=" + str.tostring(rr, "#.##") +
+                 " | signal=" + sigTypeS,
+                 alert.freq_once_per_bar_close)
+    armS := 0
+
+// --- Then (re)arm / expire ---
+if bullSignal
+    sigCloseL := close
+    sigLowL   := low
+    armL      := armBarsEff
+    sigTypeL  := jwBull and ptBull ? "JW+PT" : jwBull ? "JW" : "PT"
+    label.new(bar_index, low, sigTypeL,
+         style = label.style_label_up, color = color.new(color.green, 20),
+         textcolor = color.white, size = size.small)
+else if armL > 0
+    armL := armL - 1
+
+if bearSignal
+    sigCloseS := close
+    sigHighS  := high
+    armS      := armBarsEff
+    sigTypeS  := jwBear and ptBear ? "JW+PT" : jwBear ? "JW" : "PT"
+    label.new(bar_index, high, sigTypeS,
+         style = label.style_label_down, color = color.new(color.red, 20),
+         textcolor = color.white, size = size.small)
+else if armS > 0
+    armS := armS - 1
+
+// Box closed: kill armed setups and (optionally) flatten.
+if sessEnd
+    armL := 0
+    armS := 0
+    if flatAtEnd
+        strategy.close_all(comment = "Box closed")
+
+// =================== Visuals / data window ===================
+plot(dATR,        "Daily ATR (prev day)",        display = display.data_window)
+plot(manipThresh, "Manipulation threshold",       display = display.data_window)
+plot(f15H - f15L, "First 15m range",              display = display.data_window)
+
+// Diagnostics: why didn't an armed signal convert? Hover a bar shortly after
+// a JW/PT label in the Data Window to see the armed countdown and what the
+// R:R would be if price confirmed right now.
+wouldBeLongRR  = (not na(sigCloseL) and armL > 0 and close > longStop)  ? (boxMid - close) / (close - longStop)  : na
+wouldBeShortRR = (not na(sigCloseS) and armS > 0 and close < shortStop) ? (close - boxMid) / (shortStop - close) : na
+plot(armL,           "Long armed (bars left)",   display = display.data_window)
+plot(armS,            "Short armed (bars left)",  display = display.data_window)
+plot(wouldBeLongRR,  "Would-be long R:R now",    display = display.data_window)
+plot(wouldBeShortRR, "Would-be short R:R now",   display = display.data_window)
+
+bgcolor(canTrade ? color.new(color.blue, 96) : na, title = "Trading window (manipulation confirmed)")
+
+var table t = table.new(position.top_right, 2, 4, border_width = 1,
+     bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 60))
+if barstate.islast
+    table.cell(t, 0, 0, "Box mode",     text_color = color.gray,  text_size = size.small)
+    table.cell(t, 1, 0, cheater ? "CHEATER" : "Normal",
+         text_color = cheater ? color.orange : color.white, text_size = size.small)
+    table.cell(t, 0, 1, "Manipulation", text_color = color.gray,  text_size = size.small)
+    table.cell(t, 1, 1, not manipDone ? "Pending" : manipConfirmed ? "CONFIRMED" : "No",
+         text_color = not manipDone ? color.gray : manipConfirmed ? color.lime : color.red, text_size = size.small)
+    table.cell(t, 0, 2, "Daily ATR",    text_color = color.gray,  text_size = size.small)
+    table.cell(t, 1, 2, str.tostring(dATR, format.mintick), text_color = color.white, text_size = size.small)
+    table.cell(t, 0, 3, "20% ATR",      text_color = color.gray,  text_size = size.small)
+    table.cell(t, 1, 3, str.tostring(manipThresh, format.mintick), text_color = color.white, text_size = size.small)

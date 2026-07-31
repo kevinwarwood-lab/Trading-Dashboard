@@ -1,0 +1,8 @@
+# Python
+__pycache__/
+*.pyc
+
+# Regenerable market data (yfinance cache is rebuilt on demand; IBKR data is
+# fetched fresh per machine against IB Gateway). Keep the repo lean.
+cache/
+data_ibkr/

@@ -1,0 +1,6 @@
+# Padder Scalp backtester + IBKR fetcher dependencies.
+# Install on the new machine with:  pip install -r requirements.txt
+pandas>=2.0
+numpy>=1.24
+yfinance>=0.2
+ib_async>=2.0
